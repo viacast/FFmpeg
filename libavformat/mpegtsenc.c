@@ -1524,7 +1524,7 @@ static void mpegts_write_pes(AVFormatContext *s, AVStream *st,
                     if (ts_st2->pcr_period) {
                         if (pcr - ts_st2->last_pcr >= ts_st2->pcr_period) {
                             ts_st2->last_pcr = FFMAX(pcr - ts_st2->pcr_period, ts_st2->last_pcr + ts_st2->pcr_period);
-                            if (st2 != st) {
+                            if ((st2 != st) || (ts_st2->pcr_pid != ts_st2->pid)){
                                 mpegts_insert_pcr_only(s, st2);
                                 pcr = get_pcr(ts);
                             } else {
