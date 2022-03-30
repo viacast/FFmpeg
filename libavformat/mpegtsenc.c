@@ -95,6 +95,7 @@ typedef struct MpegTSWrite {
     int service_id;
     int service_type;
 
+    int pcr_start_pid;
     int pmt_start_pid;
     int start_pid;
     int m2ts_mode;
@@ -238,6 +239,7 @@ static int mpegts_write_section1(MpegTSSection *s, int tid, int id,
 
 typedef struct MpegTSWriteStream {
     int pid; /* stream associated pid */
+    int pcr_pid;
     int cc;
     int discontinuity;
     int payload_size;
@@ -1067,7 +1069,10 @@ static void select_pcr_streams(AVFormatContext *s)
 
         if (pcr_st) {
             MpegTSWriteStream *ts_st = pcr_st->priv_data;
-            service->pcr_pid = ts_st->pid;
+            if (ts->pcr_start_pid != 0x1fff)
+                service->pcr_pid = ts_st->pcr_pid = ts->pcr_start_pid + i;
+            else
+                service->pcr_pid = ts_st->pcr_pid = ts_st->pid;
             enable_pcr_generation_for_stream(s, pcr_st);
             av_log(s, AV_LOG_VERBOSE, "service %i using PCR in pid=%i, pcr_period=%"PRId64"ms\n",
                 service->sid, service->pcr_pid, av_rescale(ts_st->pcr_period, 1000, PCR_TIME_BASE));
@@ -1362,9 +1367,9 @@ static void mpegts_insert_pcr_only(AVFormatContext *s, AVStream *st)
 
     q    = buf;
     *q++ = 0x47;
-    *q++ = ts_st->pid >> 8;
-    *q++ = ts_st->pid;
-    *q++ = 0x20 | ts_st->cc;   /* Adaptation only */
+    *q++ = ts_st->pcr_pid >> 8;
+    *q++ = ts_st->pcr_pid;
+    *q++ = 0x20 | ((ts_st->pcr_pid == ts_st->pid ) ? ts_st->cc : 0);   /* Adaptation only */
     /* Continuity Count field does not increment (see 13818-1 section 2.4.3.3) */
     *q++ = TS_PACKET_SIZE - 5; /* Adaptation Field Length */
     *q++ = 0x10;               /* Adaptation flags: PCR present */
@@ -1567,12 +1572,12 @@ static void mpegts_write_pes(AVFormatContext *s, AVStream *st,
         if (key && is_start && pts != AV_NOPTS_VALUE &&
             !is_dvb_teletext /* adaptation+payload forbidden for teletext (ETSI EN 300 472 V1.3.1 4.1) */) {
             // set Random Access for key frames
-            if (ts_st->pcr_period)
+            if (ts_st->pcr_period) 
                 write_pcr = 1;
             set_af_flag(buf, 0x40);
             q = get_ts_payload_start(buf);
         }
-        if (write_pcr) {
+        if (write_pcr && (ts_st->pcr_pid == ts_st->pid)) {
             set_af_flag(buf, 0x10);
             q = get_ts_payload_start(buf);
             // add 11, pcr references the last byte of program clock reference base
@@ -2263,6 +2268,8 @@ static const AVOption options[] = {
       OFFSET(pmt_start_pid), AV_OPT_TYPE_INT, { .i64 = 0x1000 }, FIRST_OTHER_PID, LAST_OTHER_PID, ENC },
     { "mpegts_start_pid", "Set the first pid.",
       OFFSET(start_pid), AV_OPT_TYPE_INT, { .i64 = 0x0100 }, FIRST_OTHER_PID, LAST_OTHER_PID, ENC },
+    { "mpegts_pcr_start_pid", "Set the first pid.",
+      OFFSET(pcr_start_pid), AV_OPT_TYPE_INT, { .i64 =  0x1fff}, FIRST_OTHER_PID, 0x1fff, ENC },
     { "mpegts_m2ts_mode", "Enable m2ts mode.", OFFSET(m2ts_mode), AV_OPT_TYPE_BOOL, { .i64 = -1 }, -1, 1, ENC },
     { "muxrate", NULL, OFFSET(mux_rate), AV_OPT_TYPE_INT, { .i64 = 1 }, 0, INT_MAX, ENC },
     { "pes_payload_size", "Minimum PES packet payload in bytes",
