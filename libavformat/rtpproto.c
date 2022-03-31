@@ -53,6 +53,8 @@ typedef struct RTPContext {
     socklen_t last_rtp_source_len, last_rtcp_source_len;
     int ttl;
     int buffer_size;
+    int64_t bitrate; /* number of bits to send per second */
+    int64_t burst_bits;
     int rtcp_port, local_rtpport, local_rtcpport;
     int connect;
     int pkt_size;
@@ -70,6 +72,8 @@ typedef struct RTPContext {
 static const AVOption options[] = {
     { "ttl",                "Time to live (multicast only)",                                    OFFSET(ttl),             AV_OPT_TYPE_INT,    { .i64 = -1 },    -1, 255,     .flags = D|E },
     { "buffer_size",        "Send/Receive buffer size (in bytes)",                              OFFSET(buffer_size),     AV_OPT_TYPE_INT,    { .i64 = -1 },    -1, INT_MAX, .flags = D|E },
+    { "bitrate",            "Bits to send per second",                                          OFFSET(bitrate),         AV_OPT_TYPE_INT64,  { .i64 = 0  },     0, INT64_MAX, .flags = E },
+    { "burst_bits",         "Max length of bursts in bits (when using bitrate)",                OFFSET(burst_bits),      AV_OPT_TYPE_INT64,  { .i64 = 0  },     0, INT64_MAX, .flags = E },
     { "rtcp_port",          "Custom rtcp port",                                                 OFFSET(rtcp_port),       AV_OPT_TYPE_INT,    { .i64 = -1 },    -1, INT_MAX, .flags = D|E },
     { "local_rtpport",      "Local rtp port",                                                   OFFSET(local_rtpport),   AV_OPT_TYPE_INT,    { .i64 = -1 },    -1, INT_MAX, .flags = D|E },
     { "local_rtcpport",     "Local rtcp port",                                                  OFFSET(local_rtcpport),  AV_OPT_TYPE_INT,    { .i64 = -1 },    -1, INT_MAX, .flags = D|E },
@@ -186,14 +190,19 @@ static void build_udp_url(RTPContext *s,
     if (s->ttl >= 0)
         url_add_option(buf, buf_size, "ttl=%d", s->ttl);
     if (s->buffer_size >= 0)
-        url_add_option(buf, buf_size, "buffer_size=%d", s->buffer_size);
+        url_add_option(buf, buf_size, "fifo_size=%d", s->buffer_size);
+    else
+        url_add_option(buf, buf_size, "fifo_size=0");
+    if ((s->bitrate >= 0) && (s->pkt_size > 12))
+        url_add_option(buf, buf_size, "bitrate=%d", (int64_t)s->bitrate * s->pkt_size / (s->pkt_size - 12));
+    if (s->burst_bits >= 0)
+        url_add_option(buf, buf_size, "burst_bits=%d", s->burst_bits);   
     if (s->pkt_size >= 0)
         url_add_option(buf, buf_size, "pkt_size=%d", s->pkt_size);
     if (s->connect)
         url_add_option(buf, buf_size, "connect=1");
     if (s->dscp >= 0)
         url_add_option(buf, buf_size, "dscp=%d", s->dscp);
-    url_add_option(buf, buf_size, "fifo_size=0");
     if (include_sources && include_sources[0])
         url_add_option(buf, buf_size, "sources=%s", include_sources);
     if (exclude_sources && exclude_sources[0])
@@ -250,6 +259,15 @@ static int rtp_open(URLContext *h, const char *uri, int flags)
         }
         if (av_find_info_tag(buf, sizeof(buf), "rtcpport", p)) {
             s->rtcp_port = strtol(buf, NULL, 10);
+        }
+        if (av_find_info_tag(buf, sizeof(buf), "bitrate", p)) {
+            s->bitrate = strtol(buf, NULL, 10);
+        }
+        if (av_find_info_tag(buf, sizeof(buf), "burst_bits", p)) {
+            s->burst_bits = strtol(buf, NULL, 10);
+        }
+        if (av_find_info_tag(buf, sizeof(buf), "buffer_size", p)) {
+            s->buffer_size = strtol(buf, NULL, 10);
         }
         if (av_find_info_tag(buf, sizeof(buf), "localport", p)) {
             s->local_rtpport = strtol(buf, NULL, 10);
