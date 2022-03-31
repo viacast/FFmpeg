@@ -120,6 +120,7 @@ typedef struct MpegTSWrite {
     int64_t last_pat_ts;
     int64_t last_sdt_ts;
     int64_t last_nit_ts;
+    int64_t last_pmt_ts;
 
     uint8_t provider_name[256];
 
@@ -1267,9 +1268,11 @@ static int mpegts_init(AVFormatContext *s)
     ts->last_pat_ts = AV_NOPTS_VALUE;
     ts->last_sdt_ts = AV_NOPTS_VALUE;
     ts->last_nit_ts = AV_NOPTS_VALUE;
+    ts->last_pmt_ts = AV_NOPTS_VALUE;
     ts->pat_period = av_rescale(ts->pat_period_us, PCR_TIME_BASE, AV_TIME_BASE);
     ts->sdt_period = av_rescale(ts->sdt_period_us, PCR_TIME_BASE, AV_TIME_BASE);
     ts->nit_period = av_rescale(ts->nit_period_us, PCR_TIME_BASE, AV_TIME_BASE);
+    /* PMT use same pat period */
 
     /* assign provider name */
     provider = av_dict_get(s->metadata, "service_provider", NULL, 0);
@@ -1295,11 +1298,28 @@ static int mpegts_init(AVFormatContext *s)
 }
 
 /* send SDT, NIT, PAT and PMT tables regularly */
-static void retransmit_si_info(AVFormatContext *s, int force_pat, int force_sdt, int force_nit, int64_t pcr)
+static int retransmit_si_info(AVFormatContext *s, int force_pat, int force_sdt, int force_nit, int64_t pcr)
 {
     MpegTSWrite *ts = s->priv_data;
     int i;
 
+    if ((pcr != AV_NOPTS_VALUE && ts->last_pat_ts == AV_NOPTS_VALUE) ||
+        (pcr != AV_NOPTS_VALUE && pcr - ts->last_pat_ts >= ts->pat_period) ||
+        force_pat) {
+        if (pcr != AV_NOPTS_VALUE)
+            ts->last_pat_ts = FFMAX(pcr, ts->last_pat_ts);
+        mpegts_write_pat(s);
+        return 1;
+    }
+    if ((pcr != AV_NOPTS_VALUE && ts->last_pmt_ts == AV_NOPTS_VALUE) ||
+        (pcr != AV_NOPTS_VALUE && pcr - ts->last_pmt_ts >= ts->pat_period) ||
+        force_pat) {
+        if (pcr != AV_NOPTS_VALUE)
+            ts->last_pmt_ts = FFMAX(pcr, ts->last_pmt_ts);
+        for (i = 0; i < ts->nb_services; i++)
+            mpegts_write_pmt(s, ts->services[i]);
+        return i;
+    }
     if ((pcr != AV_NOPTS_VALUE && ts->last_sdt_ts == AV_NOPTS_VALUE) ||
         (pcr != AV_NOPTS_VALUE && pcr - ts->last_sdt_ts >= ts->sdt_period) ||
         force_sdt
@@ -1307,15 +1327,7 @@ static void retransmit_si_info(AVFormatContext *s, int force_pat, int force_sdt,
         if (pcr != AV_NOPTS_VALUE)
             ts->last_sdt_ts = FFMAX(pcr, ts->last_sdt_ts);
         mpegts_write_sdt(s);
-    }
-    if ((pcr != AV_NOPTS_VALUE && ts->last_pat_ts == AV_NOPTS_VALUE) ||
-        (pcr != AV_NOPTS_VALUE && pcr - ts->last_pat_ts >= ts->pat_period) ||
-        force_pat) {
-        if (pcr != AV_NOPTS_VALUE)
-            ts->last_pat_ts = FFMAX(pcr, ts->last_pat_ts);
-        mpegts_write_pat(s);
-        for (i = 0; i < ts->nb_services; i++)
-            mpegts_write_pmt(s, ts->services[i]);
+        return 1;
     }
     if ((pcr != AV_NOPTS_VALUE && ts->last_nit_ts == AV_NOPTS_VALUE) ||
         (pcr != AV_NOPTS_VALUE && pcr - ts->last_nit_ts >= ts->nit_period) ||
@@ -1323,9 +1335,12 @@ static void retransmit_si_info(AVFormatContext *s, int force_pat, int force_sdt,
     ) {
         if (pcr != AV_NOPTS_VALUE)
             ts->last_nit_ts = FFMAX(pcr, ts->last_nit_ts);
-        if (ts->flags & MPEGTS_FLAG_NIT)
+        if (ts->flags & MPEGTS_FLAG_NIT) {
             mpegts_write_nit(s);
+            return 1;
     }
+    }
+    return 0;
 }
 
 static int write_pcr_bits(uint8_t *buf, int64_t pcr)
@@ -1504,6 +1519,7 @@ static void mpegts_write_pes(AVFormatContext *s, AVStream *st,
         else if (dts != AV_NOPTS_VALUE)
             pcr = (dts - delay) * 300;
 
+        if(ts->mux_rate == 1)
         retransmit_si_info(s, force_pat, force_sdt, force_nit, pcr);
         force_pat = 0;
         force_sdt = 0;
@@ -1541,10 +1557,15 @@ static void mpegts_write_pes(AVFormatContext *s, AVStream *st,
                 if (write_pcr)
                     mpegts_insert_pcr_only(s, st);
                 else
+                    if (retransmit_si_info(s, force_pat, force_sdt, force_nit, pcr) == 0)
                     mpegts_insert_null_packet(s);
                 /* recalculate write_pcr and possibly retransmit si_info */
                 continue;
             }
+            if (write_pcr == 0)
+                if (retransmit_si_info(s, force_pat, force_sdt, force_nit, pcr) > 0)
+                    continue;
+
         } else if (ts_st->pcr_period && pcr != AV_NOPTS_VALUE) {
             if (pcr - ts_st->last_pcr >= ts_st->pcr_period && is_start) {
                 ts_st->last_pcr = FFMAX(pcr - ts_st->pcr_period, ts_st->last_pcr + ts_st->pcr_period);
@@ -1572,7 +1593,7 @@ static void mpegts_write_pes(AVFormatContext *s, AVStream *st,
         if (key && is_start && pts != AV_NOPTS_VALUE &&
             !is_dvb_teletext /* adaptation+payload forbidden for teletext (ETSI EN 300 472 V1.3.1 4.1) */) {
             // set Random Access for key frames
-            if (ts_st->pcr_period) 
+            if ((ts_st->pcr_period) && (ts->mux_rate == 1))
                 write_pcr = 1;
             set_af_flag(buf, 0x40);
             q = get_ts_payload_start(buf);
