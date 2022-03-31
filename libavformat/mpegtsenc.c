@@ -111,6 +111,7 @@ typedef struct MpegTSWrite {
 #define MPEGTS_FLAG_SYSTEM_B        0x08
 #define MPEGTS_FLAG_DISCONT         0x10
 #define MPEGTS_FLAG_NIT             0x20
+#define MPEGTS_FLAG_ROUND_PCR_PERIOD    0x40
     int flags;
     int copyts;
     int tables_version;
@@ -1025,7 +1026,10 @@ static void enable_pcr_generation_for_stream(AVFormatContext *s, AVStream *pcr_s
 
     if (ts->mux_rate > 1 || ts->pcr_period_ms >= 0) {
         int pcr_period_ms = ts->pcr_period_ms == -1 ? PCR_RETRANS_TIME : ts->pcr_period_ms;
-        ts_st->pcr_period = av_rescale(pcr_period_ms, PCR_TIME_BASE, 1000);
+        if ((ts->mux_rate > 1) &&  (ts->flags & MPEGTS_FLAG_ROUND_PCR_PERIOD))
+            ts_st->pcr_period = ((int64_t) ts->mux_rate * pcr_period_ms / (TS_PACKET_SIZE * 8 * 1000)) * TS_PACKET_SIZE * 8 * PCR_TIME_BASE / ts->mux_rate;
+        else
+            ts_st->pcr_period = av_rescale(pcr_period_ms, PCR_TIME_BASE, 1000);
     } else {
         /* By default, for VBR we select the highest multiple of frame duration which is less than 100 ms. */
         int64_t frame_period = 0;
@@ -2314,6 +2318,8 @@ static const AVOption options[] = {
       OFFSET(omit_video_pes_length), AV_OPT_TYPE_BOOL, { .i64 = 1 }, 0, 1, ENC },
     { "pcr_period", "PCR retransmission time in milliseconds",
       OFFSET(pcr_period_ms), AV_OPT_TYPE_INT, { .i64 = -1 }, -1, INT_MAX, ENC },
+    { "round_pcr_period", "Round PCR retransmission time to a constant interval",
+      0, AV_OPT_TYPE_CONST, { .i64 = MPEGTS_FLAG_ROUND_PCR_PERIOD }, 0, INT_MAX, ENC, "mpegts_flags" },
     { "pat_period", "PAT/PMT retransmission time limit in seconds",
       OFFSET(pat_period_us), AV_OPT_TYPE_DURATION, { .i64 = PAT_RETRANS_TIME * 1000LL }, 0, INT64_MAX, ENC },
     { "sdt_period", "SDT retransmission time limit in seconds",
