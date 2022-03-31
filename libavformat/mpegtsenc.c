@@ -2293,7 +2293,7 @@ static const AVOption options[] = {
       OFFSET(pmt_start_pid), AV_OPT_TYPE_INT, { .i64 = 0x1000 }, FIRST_OTHER_PID, LAST_OTHER_PID, ENC },
     { "mpegts_start_pid", "Set the first pid.",
       OFFSET(start_pid), AV_OPT_TYPE_INT, { .i64 = 0x0100 }, FIRST_OTHER_PID, LAST_OTHER_PID, ENC },
-    { "mpegts_pcr_start_pid", "Set the first pid.",
+    { "mpegts_pcr_start_pid", "Set the first PCR pid.",
       OFFSET(pcr_start_pid), AV_OPT_TYPE_INT, { .i64 =  0x1fff}, FIRST_OTHER_PID, 0x1fff, ENC },
     { "mpegts_m2ts_mode", "Enable m2ts mode.", OFFSET(m2ts_mode), AV_OPT_TYPE_BOOL, { .i64 = -1 }, -1, 1, ENC },
     { "muxrate", NULL, OFFSET(mux_rate), AV_OPT_TYPE_INT, { .i64 = 1 }, 0, INT_MAX, ENC },
