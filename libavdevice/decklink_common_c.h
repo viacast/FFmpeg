@@ -62,7 +62,7 @@ struct decklink_cctx {
     int draw_bars;
     char *format_code;
     int raw_format;
-    int64_t queue_size;
+    int queue_size;
     int copyts;
     int64_t timestamp_align;
     int timing_offset;

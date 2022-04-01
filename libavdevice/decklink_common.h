@@ -85,7 +85,7 @@ typedef struct AVPacketQueue {
     pthread_mutex_t mutex;
     pthread_cond_t cond;
     AVFormatContext *avctx;
-    int64_t max_q_size;
+    int max_q_size;
 } AVPacketQueue;
 
 struct decklink_ctx {
