@@ -586,6 +586,7 @@ static int avpacket_queue_get(AVPacketQueue *q, AVPacket *pkt, int block)
     return ret;
 }
 
+#if BLACKMAGIC_DECKLINK_API_VERSION >= 0x0b000000
 static void handle_klv(AVFormatContext *avctx, decklink_ctx *ctx, IDeckLinkVideoInputFrame *videoFrame, int64_t pts)
 {
     const uint8_t KLV_DID = 0x44;
@@ -687,6 +688,7 @@ static void handle_klv(AVFormatContext *avctx, decklink_ctx *ctx, IDeckLinkVideo
         }
     }
 }
+#endif
 
 class decklink_input_callback : public IDeckLinkInputCallback
 {
@@ -977,10 +979,12 @@ HRESULT decklink_input_callback::VideoInputFrameArrived(
             AVPacket txt_pkt = { 0 };
             uint8_t txt_buf0[3531]; // 35 * 46 bytes decoded teletext lines + 1 byte data_identifier + 1920 bytes OP47 decode buffer
             uint8_t *txt_buf = txt_buf0;
-
+            
+#if BLACKMAGIC_DECKLINK_API_VERSION >= 0x0b000000
             if (ctx->enable_klv) {
                 handle_klv(avctx, ctx, videoFrame, pkt.pts);
             }
+#endif
 
             if (videoFrame->GetAncillaryData(&vanc) == S_OK) {
                 int i;
@@ -1363,6 +1367,7 @@ av_cold int ff_decklink_read_header(AVFormatContext *avctx)
 
     ctx->video_st=st;
 
+#if BLACKMAGIC_DECKLINK_API_VERSION >= 0x0b000000
     if (ctx->enable_klv) {
         st = avformat_new_stream(avctx, NULL);
         if (!st) {
@@ -1376,6 +1381,7 @@ av_cold int ff_decklink_read_header(AVFormatContext *avctx)
         avpriv_set_pts_info(st, 64, 1, 1000000);  /* 64 bits pts in us */
         ctx->klv_st = st;
     }
+#endif
 
     if (ctx->teletext_lines) {
         st = avformat_new_stream(avctx, NULL);

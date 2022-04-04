@@ -225,6 +225,7 @@ int ff_decklink_set_configs(AVFormatContext *avctx,
             av_log(avctx, AV_LOG_WARNING, "Setting link configuration failed.\n");
         else
             av_log(avctx, AV_LOG_VERBOSE, "Successfully set link configuration: 0x%x.\n", ctx->link);
+#if BLACKMAGIC_DECKLINK_API_VERSION >= 0x0b000000
         if (ctx->link == bmdLinkConfigurationQuadLink && cctx->sqd >= 0) {
             res = ctx->cfg->SetFlag(bmdDeckLinkConfigQuadLinkSDIVideoOutputSquareDivisionSplit, cctx->sqd);
             if (res != S_OK)
@@ -232,6 +233,7 @@ int ff_decklink_set_configs(AVFormatContext *avctx,
             else
                 av_log(avctx, AV_LOG_VERBOSE, "Successfully set SquareDivisionSplit.\n");
         }
+#endif
     }
 
     if (direction == DIRECTION_OUT && cctx->level_a >= 0) {
