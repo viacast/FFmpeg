@@ -1582,6 +1582,12 @@ static const SEIMessageTypeDescriptor cbs_sei_h264_types[] = {
         sizeof(H264RawSEIDisplayOrientation),
         SEI_MESSAGE_RW(h264, sei_display_orientation),
     },
+    {
+        SEI_TYPE_TIME_CODE,
+        1, 0,
+        sizeof(H265RawSEITimeCode),
+        SEI_MESSAGE_RW(h265, sei_time_code),
+    },
     SEI_MESSAGE_TYPE_END
 };
 
