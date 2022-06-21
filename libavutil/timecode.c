@@ -31,6 +31,7 @@
 #include "timecode.h"
 #include "log.h"
 #include "error.h"
+#include "time.h"
 
 int av_timecode_adjust_ntsc_framenum2(int framenum, int fps)
 {
@@ -226,6 +227,25 @@ int av_timecode_init(AVTimecode *tc, AVRational rate, int flags, int frame_start
     tc->rate  = rate;
     tc->fps   = fps_from_frame_rate(rate);
     return check_timecode(log_ctx, tc);
+}
+
+int av_timecode_init_from_now(AVTimecode *tc, AVRational rate, int flags ,void *log_ctx)
+{
+    unsigned int fps = fps_from_frame_rate(rate);  
+    int hh, mm, ss, ff, ff_len, neg = 0;
+
+    if (rate.den == 1001)
+        flags |= AV_TIMECODE_FLAG_DROPFRAME;
+    
+    flags |= AV_TIMECODE_FLAG_24HOURSMAX;
+    int64_t one_day_time_us= av_gettime() % (24 * 60 * 60 * INT64_C(1000000)); // wrap around after 24 hours (in microseconds)
+    
+    hh=one_day_time_us / (60 * 60 * INT64_C(1000000));
+    mm=one_day_time_us / (60 * INT64_C(1000000)) - hh * 60;
+    ss=one_day_time_us / INT64_C(1000000) - (mm * 60) - (hh * 60 * 60);
+    ff=(one_day_time_us % INT64_C(1000000)) / (fps * 1000);
+    
+    return av_timecode_init_from_components(tc,rate,flags, hh, mm, ss, ff, log_ctx);
 }
 
 int av_timecode_init_from_components(AVTimecode *tc, AVRational rate, int flags, int hh, int mm, int ss, int ff, void *log_ctx)

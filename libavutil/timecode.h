@@ -178,6 +178,19 @@ int av_timecode_init(AVTimecode *tc, AVRational rate, int flags, int frame_start
 int av_timecode_init_from_components(AVTimecode *tc, AVRational rate, int flags, int hh, int mm, int ss, int ff, void *log_ctx);
 
 /**
+ * Init a timecode struct from time of machine (using ntp).
+ *
+ * @param log_ctx     a pointer to an arbitrary struct of which the first field
+ *                    is a pointer to an AVClass struct (used for av_log)
+ * @param tc          pointer to an allocated AVTimecode
+ * @param rate        frame rate in rational form
+ * @param flags       miscellaneous flags such as drop frame, +24 hours, ...
+ *                    (see AVTimecodeFlag)
+ * @return            0 on success, AVERROR otherwise
+ */
+int av_timecode_init_from_now(AVTimecode *tc, AVRational rate, int flags, void *log_ctx);
+
+/**
  * Parse timecode representation (hh:mm:ss[:;.]ff).
  *
  * @param log_ctx a pointer to an arbitrary struct of which the first field is a

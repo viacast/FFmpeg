@@ -798,7 +798,10 @@ static int get_bmd_timecode(AVFormatContext *avctx, AVTimecode *tc, AVRational f
 #else
     int hfr = 0;
 #endif
-    if (videoFrame->GetTimecode(tc_format, &timecode) == S_OK) {
+    if (tc_format == 9) {
+        ret = av_timecode_init_from_now(tc, frame_rate, 0 ,avctx);
+    }
+    else if (videoFrame->GetTimecode(tc_format, &timecode) == S_OK) {
         uint8_t hh, mm, ss, ff;
         if (timecode->GetComponents(&hh, &mm, &ss, &ff) == S_OK) {
             int flags = (timecode->GetFlags() & bmdTimecodeIsDropFrame) ? AV_TIMECODE_FLAG_DROPFRAME : 0;
@@ -1179,6 +1182,7 @@ av_cold int ff_decklink_read_header(AVFormatContext *avctx)
     ctx->teletext_lines = cctx->teletext_lines;
     ctx->preroll      = cctx->preroll;
     ctx->duplex_mode  = cctx->duplex_mode;
+    ctx->tc_format    = cctx->tc_format;
     if (cctx->tc_format > 0 && (unsigned int)cctx->tc_format < FF_ARRAY_ELEMS(decklink_timecode_format_map))
         ctx->tc_format = decklink_timecode_format_map[cctx->tc_format];
     if (cctx->video_input > 0 && (unsigned int)cctx->video_input < FF_ARRAY_ELEMS(decklink_video_connection_map))
