@@ -28,6 +28,7 @@
 
 #include "libavutil/common.h"
 #include "libavutil/opt.h"
+#include "internal.h"
 
 #include "avcodec.h"
 #include "codec_internal.h"
@@ -41,36 +42,92 @@ typedef struct QSVH264EncContext {
     QSVEncContext qsv;
 } QSVH264EncContext;
 
+static unsigned bcd2uint(uint8_t bcd)
+{
+    unsigned low  = bcd & 0xf;
+    unsigned high = bcd >> 4;
+    if (low > 9 || high > 9)
+        return 0;
+    return low + 10*high;
+}
+
 static int qsv_h264_set_encode_ctrl(AVCodecContext *avctx,
                                     const AVFrame *frame, mfxEncodeCtrl* enc_ctrl)
 {
     QSVH264EncContext *qh264 = avctx->priv_data;
     QSVEncContext *q = &qh264->qsv;
 
-    if (q->a53_cc && frame) {
+    if (!frame) {
+        return 0;
+    }
+
+    if (q->a53_cc && av_frame_get_side_data(frame, AV_FRAME_DATA_A53_CC)) {
         mfxPayload* payload;
         mfxU8* sei_data;
         size_t sei_size;
-        int res;
 
-        res = ff_alloc_a53_sei(frame, sizeof(mfxPayload) + 2, (void**)&payload, &sei_size);
-        if (res < 0 || !payload)
-            return res;
+        if (ff_alloc_a53_sei(frame, sizeof(mfxPayload) + 2, (void**)&payload, &sei_size)) {
+            av_log(q, AV_LOG_ERROR, "Not enough memory for closed captions, skipping\n");
+        }
+        
+        if (payload) {
+            sei_data = (mfxU8*)(payload + 1);
+            // SEI header
+            sei_data[0] = 4;
+            sei_data[1] = (mfxU8)sei_size; // size of SEI data
+            // SEI data filled in by ff_alloc_a53_sei
 
-        sei_data = (mfxU8*)(payload + 1);
-        // SEI header
-        sei_data[0] = 4;
-        sei_data[1] = (mfxU8)sei_size; // size of SEI data
-        // SEI data filled in by ff_alloc_a53_sei
+            payload->BufSize = sei_size + 2;
+            payload->NumBit = payload->BufSize * 8;
+            payload->Type = 4;
+            payload->Data = sei_data;
 
-        payload->BufSize = sei_size + 2;
-        payload->NumBit = payload->BufSize * 8;
-        payload->Type = 4;
-        payload->Data = sei_data;
+            enc_ctrl->NumPayload = 1;
+            enc_ctrl->Payload[0] = payload;
+        }
+    }
 
-        enc_ctrl->NumExtParam = 0;
-        enc_ctrl->NumPayload = 1;
-        enc_ctrl->Payload[0] = payload;
+    if (q->s12m_tc && av_frame_get_side_data(frame, AV_FRAME_DATA_S12M_TIMECODE))
+    {
+        mfxExtPictureTimingSEI *extpictimingsei;
+        AVFrameSideData *sd = NULL;
+        uint32_t *tc;
+        int m;
+
+        sd = av_frame_get_side_data(frame, AV_FRAME_DATA_S12M_TIMECODE);
+        tc = (uint32_t*)sd->data;
+        m  = tc[0] & 3;
+
+        extpictimingsei = av_mallocz(sizeof(mfxExtPictureTimingSEI));
+        extpictimingsei->Header.BufferId = MFX_EXTBUFF_PICTURE_TIMING_SEI;
+        extpictimingsei->Header.BufferSz = sizeof(q->extpictimingsei);
+
+        for (int j = 0; j < m; ++j) {
+            // copied from ff_alloc_timecode_sei() (libavcodec/utils.c)
+            uint32_t tcsmpte = tc[j+1];
+            unsigned hh   = bcd2uint(tcsmpte     & 0x3f);    // 6-bit hours
+            unsigned mm   = bcd2uint(tcsmpte>>8  & 0x7f);    // 7-bit minutes
+            unsigned ss   = bcd2uint(tcsmpte>>16 & 0x7f);    // 7-bit seconds
+            unsigned ff   = bcd2uint(tcsmpte>>24 & 0x3f);    // 6-bit frames
+            unsigned drop = tcsmpte & 1<<30 && !0;           // 1-bit drop if not arbitrary bit
+
+            extpictimingsei->TimeStamp[j].ClockTimestampFlag = 1;
+            extpictimingsei->TimeStamp[j].CtType = 2;
+            extpictimingsei->TimeStamp[j].NuitFieldBasedFlag = 1;
+            extpictimingsei->TimeStamp[j].CountingType = 4;
+            extpictimingsei->TimeStamp[j].FullTimestampFlag = 1;
+            extpictimingsei->TimeStamp[j].DiscontinuityFlag = 0;
+            extpictimingsei->TimeStamp[j].CntDroppedFlag = drop;
+            extpictimingsei->TimeStamp[j].NFrames = ff;
+            extpictimingsei->TimeStamp[j].SecondsFlag = 1;
+            extpictimingsei->TimeStamp[j].MinutesFlag = 1;
+            extpictimingsei->TimeStamp[j].HoursFlag = 1;
+            extpictimingsei->TimeStamp[j].SecondsValue = ss;
+            extpictimingsei->TimeStamp[j].MinutesValue = mm;
+            extpictimingsei->TimeStamp[j].HoursValue = hh;
+            extpictimingsei->TimeStamp[j].TimeOffset = 0;
+        }
+        enc_ctrl->ExtParam[enc_ctrl->NumExtParam++] = (mfxExtBuffer *)extpictimingsei;
     }
     return 0;
 }
@@ -150,6 +207,7 @@ static const AVOption options[] = {
     { "high"    , NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MFX_PROFILE_AVC_HIGH     }, INT_MIN, INT_MAX,     VE, "profile" },
 
     { "a53cc" , "Use A53 Closed Captions (if available)", OFFSET(qsv.a53_cc), AV_OPT_TYPE_BOOL, {.i64 = 1}, 0, 1, VE},
+    { "s12m_tc",      "Use timecode (if available)",        OFFSET(qsv.s12m_tc),      AV_OPT_TYPE_BOOL,  { .i64 = 1 }, 0, 1,       VE },
 
     { "aud", "Insert the Access Unit Delimiter NAL", OFFSET(qsv.aud), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VE},
 

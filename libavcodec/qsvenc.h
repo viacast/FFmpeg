@@ -130,6 +130,7 @@ typedef struct QSVEncContext {
     mfxExtCodingOption  extco;
     mfxExtCodingOption2 extco2;
     mfxExtCodingOption3 extco3;
+    mfxExtPictureTimingSEI extpictimingsei;
 #if QSV_HAVE_MF
     mfxExtMultiFrameParam   extmfp;
     mfxExtMultiFrameControl extmfc;
@@ -204,6 +205,7 @@ typedef struct QSVEncContext {
     int transform_skip;
 
     int a53_cc;
+    int s12m_tc;
 
 #if QSV_HAVE_MF
     int mfmode;

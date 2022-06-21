@@ -1387,6 +1387,10 @@ static void free_encoder_ctrl_payloads(mfxEncodeCtrl* enc_ctrl)
             av_freep(&enc_ctrl->Payload[i]);
         }
         enc_ctrl->NumPayload = 0;
+        for (i = 0; i < enc_ctrl->NumExtParam && i < QSV_MAX_FRAME_EXT_PARAMS; i++) {
+            av_freep(&enc_ctrl->ExtParam[i]);
+        }
+        enc_ctrl->NumExtParam = 0;
     }
 }
 
@@ -1399,6 +1403,7 @@ static void clear_unused_frames(QSVEncContext *q)
             //do not reuse enc_ctrl from previous frame
             memset(&cur->enc_ctrl, 0, sizeof(cur->enc_ctrl));
             cur->enc_ctrl.Payload = cur->payloads;
+            cur->enc_ctrl.ExtParam = cur->ext_param;
             if (cur->frame->format == AV_PIX_FMT_QSV) {
                 av_frame_unref(cur->frame);
             }
@@ -1436,6 +1441,7 @@ static int get_free_frame(QSVEncContext *q, QSVFrame **f)
         return AVERROR(ENOMEM);
     }
     frame->enc_ctrl.Payload = frame->payloads;
+    frame->enc_ctrl.ExtParam = frame->ext_param;
     *last = frame;
 
     *f = frame;
