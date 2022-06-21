@@ -26,6 +26,7 @@
 
 #include "libavutil/common.h"
 #include "libavutil/opt.h"
+#include "internal.h"
 
 #include "avcodec.h"
 #include "bytestream.h"
@@ -37,6 +38,8 @@
 #include "qsv.h"
 #include "qsv_internal.h"
 #include "qsvenc.h"
+#include "h264_sei.h"
+#include "atsc_a53.h"
 
 enum LoadPlugin {
     LOAD_PLUGIN_NONE,
@@ -49,6 +52,66 @@ typedef struct QSVHEVCEncContext {
     QSVEncContext qsv;
     int load_plugin;
 } QSVHEVCEncContext;
+
+static int qsv_hevc_set_encode_ctrl(AVCodecContext *avctx,
+                                    const AVFrame *frame, mfxEncodeCtrl *enc_ctrl)
+{
+    QSVHEVCEncContext *qhevc = avctx->priv_data;
+    QSVEncContext *q = &qhevc->qsv;
+
+    if (!frame) {
+        return 0;
+    }
+
+    if (q->a53_cc && av_frame_get_side_data(frame, AV_FRAME_DATA_A53_CC)) {
+        mfxPayload* payload;
+        mfxU8* sei_data;
+        size_t sei_size;
+
+        if (ff_alloc_a53_sei(frame, sizeof(mfxPayload) + 2, (void**)&payload, &sei_size));
+            av_log(q, AV_LOG_ERROR, "Not enough memory for closed captions, skipping\n");
+
+        if (payload) {
+            sei_data = (mfxU8*)(payload + 1);
+            // SEI header
+            sei_data[0] = 4;
+            sei_data[1] = (mfxU8)sei_size; // size of SEI data
+            // SEI data filled in by ff_alloc_a53_sei
+
+            payload->BufSize = sei_size + 2;
+            payload->NumBit = payload->BufSize * 8;
+            payload->Type = 4;
+            payload->Data = sei_data;
+
+            enc_ctrl->Payload[enc_ctrl->NumPayload++] = payload;
+        }
+    }
+
+    if (q->s12m_tc && av_frame_get_side_data(frame, AV_FRAME_DATA_S12M_TIMECODE)) {
+        mfxPayload *payload;
+        mfxU8 *sei_data;
+        size_t sei_size;
+    
+        if (ff_alloc_timecode_sei(frame, avctx->framerate, sizeof(mfxPayload) + 2, (void **)&payload, &sei_size) < 0)
+            av_log(q, AV_LOG_ERROR, "Not enough memory for timecode, skipping\n");
+
+        if (payload) {
+        
+            sei_data = (mfxU8 *)(payload + 1);
+        
+            sei_data[0] = SEI_TYPE_TIME_CODE;
+            sei_data[1] = (mfxU8)sei_size; // size of SEI data
+
+            payload->BufSize = sei_size + 2;
+            payload->NumBit = payload->BufSize * 8;
+            payload->Type = 4; // is this SEI_TYPE_USER_DATA_REGISTERED_ITU_T_T35?
+            payload->Data = sei_data;
+        
+            enc_ctrl->Payload[enc_ctrl->NumPayload++] = payload;
+        }
+    }
+    return 0;
+}
 
 static int generate_fake_vps(QSVEncContext *q, AVCodecContext *avctx)
 {
@@ -166,6 +229,8 @@ static av_cold int qsv_enc_init(AVCodecContext *avctx)
     QSVHEVCEncContext *q = avctx->priv_data;
     int ret;
 
+    q->qsv.set_encode_ctrl_cb = qsv_hevc_set_encode_ctrl;
+
     if (q->load_plugin != LOAD_PLUGIN_NONE) {
         static const char * const uid_hevcenc_sw = "2fca99749fdb49aeb121a5b63ef568f7";
         static const char * const uid_hevcenc_hw = "6fadc791a0c2eb479ab6dcd5ea9da347";
@@ -261,6 +326,8 @@ static const AVOption options[] = {
     { "tile_cols",  "Number of columns for tiled encoding",   OFFSET(qsv.tile_cols),    AV_OPT_TYPE_INT, { .i64 = 0 }, 0, UINT16_MAX, VE },
     { "tile_rows",  "Number of rows for tiled encoding",      OFFSET(qsv.tile_rows),    AV_OPT_TYPE_INT, { .i64 = 0 }, 0, UINT16_MAX, VE },
     { "recovery_point_sei", "Insert recovery point SEI messages",       OFFSET(qsv.recovery_point_sei),      AV_OPT_TYPE_INT, { .i64 = -1 },               -1,          1, VE },
+    { "a53cc" , "Use A53 Closed Captions (if available)", OFFSET(qsv.a53_cc), AV_OPT_TYPE_BOOL, {.i64 = 1 }, 0, 1, VE },
+    { "s12m_tc", "Use timecode (if available)", OFFSET(qsv.s12m_tc), AV_OPT_TYPE_BOOL, { .i64 = 1 }, 0, 1, VE },
     { "aud", "Insert the Access Unit Delimiter NAL", OFFSET(qsv.aud), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VE},
     { "pic_timing_sei",    "Insert picture timing SEI with pic_struct_syntax element", OFFSET(qsv.pic_timing_sei), AV_OPT_TYPE_BOOL, { .i64 = 1 }, 0, 1, VE },
     { "transform_skip", "Turn this option ON to enable transformskip",   OFFSET(qsv.transform_skip),          AV_OPT_TYPE_INT,    { .i64 = -1},   -1, 1,  VE},
