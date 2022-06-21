@@ -59,7 +59,7 @@ static const AVOption options[] = {
     { "two_sub_device_full",      NULL,                               0,  AV_OPT_TYPE_CONST, { .i64 = 4}, 0, 0,    DEC, "duplex_mode"},
     { "four_sub_device_half",     NULL,                               0,  AV_OPT_TYPE_CONST, { .i64 = 5}, 0, 0,    DEC, "duplex_mode"},
 #endif
-    { "timecode_format", "timecode format",           OFFSET(tc_format),  AV_OPT_TYPE_INT,   { .i64 = 0}, 0, 8,    DEC, "tc_format"},
+    { "timecode_format", "timecode format",           OFFSET(tc_format),  AV_OPT_TYPE_INT,   { .i64 = 0}, 0, 9,    DEC, "tc_format"},
     { "none",          NULL,                                          0,  AV_OPT_TYPE_CONST, { .i64 = 0}, 0, 0,    DEC, "tc_format"},
     { "rp188vitc",     NULL,                                          0,  AV_OPT_TYPE_CONST, { .i64 = 1}, 0, 0,    DEC, "tc_format"},
     { "rp188vitc2",    NULL,                                          0,  AV_OPT_TYPE_CONST, { .i64 = 2}, 0, 0,    DEC, "tc_format"},
@@ -68,6 +68,8 @@ static const AVOption options[] = {
     { "vitc",          NULL,                                          0,  AV_OPT_TYPE_CONST, { .i64 = 5}, 0, 0,    DEC, "tc_format"},
     { "vitc2",         NULL,                                          0,  AV_OPT_TYPE_CONST, { .i64 = 6}, 0, 0,    DEC, "tc_format"},
     { "serial",        NULL,                                          0,  AV_OPT_TYPE_CONST, { .i64 = 7}, 0, 0,    DEC, "tc_format"},
+    { "ntp",       NULL,                                          0,  AV_OPT_TYPE_CONST, { .i64 = 9}, 0, 0,   DEC, "tc_format"},
+
 #if BLACKMAGIC_DECKLINK_API_VERSION >= 0x0b000000
     { "rp188hfr",      NULL,                                          0,  AV_OPT_TYPE_CONST, { .i64 = 8}, 0, 0,    DEC, "tc_format"},
 #endif
