@@ -740,7 +740,6 @@ error:
 
 int ff_decklink_write_packet(AVFormatContext *avctx, AVPacket *pkt)
 {
-    fprintf(stderr, "pkt->pts=%ld\n", pkt->pts);
     struct decklink_cctx *cctx = (struct decklink_cctx *)avctx->priv_data;
     struct decklink_ctx *ctx = (struct decklink_ctx *)cctx->ctx;
     AVStream *st = avctx->streams[pkt->stream_index];
