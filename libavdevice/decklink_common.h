@@ -80,6 +80,7 @@ class decklink_input_callback;
 typedef struct AVPacketQueue {
     PacketList pkt_list;
     int nb_packets;
+    int nb_video_packets;
     unsigned long long size;
     int abort_request;
     pthread_mutex_t mutex;
@@ -126,6 +127,10 @@ struct decklink_ctx {
     AVStream *klv_st;
     AVStream *teletext_st;
     uint16_t cdp_sequence_num;
+    int timecode;
+    int64_t pts_offset;
+    int frame_diff;
+    int frame_drop;
 
     /* Options */
     int list_devices;
@@ -133,6 +138,9 @@ struct decklink_ctx {
     int enable_klv;
     int64_t teletext_lines;
     double preroll;
+    int64_t timecode_offset;
+    int timecode_frame_tolerance;
+    int timecode_frames_buffer;
     int duplex_mode;
     BMDLinkConfiguration link;
     DecklinkPtsSource audio_pts_source;

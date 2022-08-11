@@ -26,6 +26,9 @@
 extern "C" {
 #endif
 
+int decklink_write_video_packet(AVFormatContext *avctx, AVPacket *pkt);
+int decklink_write_audio_packet(AVFormatContext *avctx, AVPacket *pkt);
+
 int ff_decklink_write_header(AVFormatContext *avctx);
 int ff_decklink_write_packet(AVFormatContext *avctx, AVPacket *pkt);
 int ff_decklink_write_trailer(AVFormatContext *avctx);

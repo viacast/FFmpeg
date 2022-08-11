@@ -31,6 +31,9 @@ static const AVOption options[] = {
     { "list_devices", "use ffmpeg -sinks decklink instead", OFFSET(list_devices), AV_OPT_TYPE_BOOL, { .i64 = 0   }, 0, 1, ENC | AV_OPT_FLAG_DEPRECATED},
     { "list_formats", "list supported formats"  , OFFSET(list_formats), AV_OPT_TYPE_INT   , { .i64 = 0   }, 0, 1, ENC },
     { "preroll"     , "video preroll in seconds", OFFSET(preroll     ), AV_OPT_TYPE_DOUBLE, { .dbl = 0.5 }, 0, 5, ENC },
+    { "timecode_offset", "how long in microseconds the video should be delayed relative to current time (0 is disabled)", OFFSET(timecode_offset), AV_OPT_TYPE_INT64, { .i64 = 0 }, 0, INT64_MAX, ENC },
+    { "timecode_frame_tolerance", "how many frames the video should be offset from the target before adjusting", OFFSET(timecode_frame_tolerance), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 30, ENC },
+    { "timecode_frames_buffer", "the max amount of frames that can be buffered before dropping", OFFSET(timecode_frames_buffer), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 600, ENC },
 #if BLACKMAGIC_DECKLINK_API_VERSION >= 0x0b000000
     { "duplex_mode" , "duplex mode"             , OFFSET(duplex_mode ), AV_OPT_TYPE_INT   , { .i64 = 0   }, 0, 5, ENC, "duplex_mode"},
 #else

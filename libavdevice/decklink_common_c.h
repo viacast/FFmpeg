@@ -45,6 +45,10 @@ struct decklink_cctx {
     int enable_klv;
     int64_t teletext_lines;
     double preroll;
+    int64_t timecode_offset;
+    int timecode_frame_tolerance;
+    int timecode_frames_buffer;
+
     int audio_channels;
     int audio_depth;
     int duplex_mode;
