@@ -338,18 +338,22 @@ static int decklink_setup_video(AVFormatContext *avctx, AVStream *st)
     ctx->video = 1;
 
     ctx->last_frame = av_frame_alloc();
-    ctx->last_frame->width = c->width;
-    ctx->last_frame->height = c->height;
-    ctx->last_frame->format = c->format;
-    int ret = av_frame_get_buffer(ctx->last_frame, 0);
-    if (ret) {
-        char error[64];
-        av_strerror(ret, error, 64);
-        av_log(avctx, AV_LOG_WARNING, "Failed to alocate frame (%s -> %d)\n", error, ret);
-        av_frame_unref(ctx->last_frame);
-        return ret;
+    if (!ctx->last_frame) {
+        av_log(avctx, AV_LOG_WARNING, "Failed to alocate frame\n");
+    } else {
+        ctx->last_frame->width = c->width;
+        ctx->last_frame->height = c->height;
+        ctx->last_frame->format = c->format;
+        int ret = av_frame_get_buffer(ctx->last_frame, 0);
+        if (ret) {
+            char error[64];
+            av_strerror(ret, error, 64);
+            av_log(avctx, AV_LOG_WARNING, "Failed to alocate frame (%s -> %d)\n", error, ret);
+            av_frame_unref(ctx->last_frame);
+            return ret;
+        }
+        av_image_fill_black(ctx->last_frame->data, (ptrdiff_t *)ctx->last_frame->linesize, (AVPixelFormat)c->format, (AVColorRange)0, c->width, c->height);
     }
-    av_image_fill_black(ctx->last_frame->data, (ptrdiff_t *)ctx->last_frame->linesize, (AVPixelFormat)c->format, (AVColorRange)0, c->width, c->height);
 
     return 0;
 }
@@ -715,8 +719,6 @@ int decklink_write_audio_packet(AVFormatContext *avctx, AVPacket *pkt)
     uint32_t buffered_video = 0;
     int hr = S_OK;
 
-    ctx->last_audio_pts = FFMAX(ctx->last_audio_pts, pkt->pts);
-
     int64_t pts_offset = (bmdAudioSampleRate48kHz * ctx->bmd_tb_num * ctx->pts_offset) / ctx->bmd_tb_den;
     int64_t final_pts = pkt->pts + pts_offset;
     hr = ctx->dlo->ScheduleAudioSamples(pkt->data, sample_count, final_pts, bmdAudioSampleRate48kHz, NULL);
@@ -724,6 +726,8 @@ int decklink_write_audio_packet(AVFormatContext *avctx, AVPacket *pkt)
         av_log(avctx, AV_LOG_ERROR, "Could not schedule audio samples. error %08x.\n", (uint32_t) hr);
         return AVERROR(EIO);
     }
+
+    ctx->last_audio_pts = FFMAX(ctx->last_audio_pts, final_pts);
 
     ctx->dlo->GetBufferedVideoFrameCount(&buffered_video);
     ctx->dlo->GetBufferedAudioSampleFrameCount(&buffered_audio);
