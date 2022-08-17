@@ -46,7 +46,8 @@ struct decklink_cctx {
     int64_t teletext_lines;
     double preroll;
     int64_t timecode_offset;
-    int timecode_frame_tolerance;
+    int timecode_frame_tolerance_hard;
+    int timecode_frame_tolerance_soft;
     int timecode_frames_buffer;
 
     int audio_channels;

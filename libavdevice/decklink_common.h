@@ -131,6 +131,9 @@ struct decklink_ctx {
     int64_t pts_offset;
     int frame_diff;
     int frame_drop;
+    AVFrame *last_frame;
+    int64_t last_video_pts;
+    int64_t last_audio_pts;
 
     /* Options */
     int list_devices;
@@ -139,7 +142,8 @@ struct decklink_ctx {
     int64_t teletext_lines;
     double preroll;
     int64_t timecode_offset;
-    int timecode_frame_tolerance;
+    int timecode_frame_tolerance_hard;
+    int timecode_frame_tolerance_soft;
     int timecode_frames_buffer;
     int duplex_mode;
     BMDLinkConfiguration link;
