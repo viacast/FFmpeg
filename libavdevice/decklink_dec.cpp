@@ -55,7 +55,7 @@ extern "C" {
 
 #include "decklink_common.h"
 #include "decklink_dec.h"
-#include "decklink_packet_queue.h"
+#include "packet_queue.h"
 
 #define MAX_WIDTH_VANC 1920
 const BMDDisplayMode AUTODETECT_DEFAULT_MODE = bmdModeNTSC;

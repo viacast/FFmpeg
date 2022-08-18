@@ -1,4 +1,4 @@
-#include "decklink_packet_queue.h"
+#include "packet_queue.h"
 
 void avpacket_queue_init(AVFormatContext *avctx, AVPacketQueue *q)
 {

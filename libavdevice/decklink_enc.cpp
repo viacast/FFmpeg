@@ -39,7 +39,7 @@ extern "C" {
 #include "avdevice.h"
 }
 
-#include "decklink_packet_queue.h"
+#include "packet_queue.h"
 #include "decklink_common.h"
 #include "decklink_enc.h"
 #if CONFIG_LIBKLVANC
