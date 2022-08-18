@@ -77,18 +77,6 @@ static char *dup_cfstring_to_utf8(CFStringRef w)
 class decklink_output_callback;
 class decklink_input_callback;
 
-typedef struct AVPacketQueue {
-    PacketList pkt_list;
-    int nb_packets;
-    int nb_video_packets;
-    unsigned long long size;
-    int abort_request;
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
-    AVFormatContext *avctx;
-    int64_t max_q_size;
-} AVPacketQueue;
-
 struct decklink_ctx {
     /* DeckLink SDK interfaces */
     IDeckLink *dl;

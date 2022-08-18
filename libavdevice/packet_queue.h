@@ -8,6 +8,18 @@ extern "C" {
 #include <DeckLinkAPI.h>
 #include "decklink_common.h"
 
+typedef struct AVPacketQueue {
+    PacketList pkt_list;
+    int nb_packets;
+    int nb_video_packets;
+    unsigned long long size;
+    int abort_request;
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    AVFormatContext *avctx;
+    int64_t max_q_size;
+} AVPacketQueue;
+
 void avpacket_queue_init(AVFormatContext *avctx, AVPacketQueue *q);
 void avpacket_queue_flush(AVPacketQueue *q);
 void avpacket_queue_end(AVPacketQueue *q);
