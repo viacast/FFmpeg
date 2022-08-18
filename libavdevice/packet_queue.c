@@ -1,13 +1,14 @@
+#include <pthread.h>
+
 #include "packet_queue.h"
 
-void avpacket_queue_init(AVFormatContext *avctx, AVPacketQueue *q)
+void avpacket_queue_init(AVPacketQueue *q, int64_t max_size, AVFormatContext *avctx)
 {
-    struct decklink_cctx *ctx = (struct decklink_cctx *)avctx->priv_data;
     memset(q, 0, sizeof(AVPacketQueue));
     pthread_mutex_init(&q->mutex, NULL);
     pthread_cond_init(&q->cond, NULL);
+    q->max_q_size = max_size;
     q->avctx = avctx;
-    q->max_q_size = ctx->queue_size;
 }
 
 void avpacket_queue_flush(AVPacketQueue *q)

@@ -48,6 +48,7 @@ extern "C" {
 #include "libavutil/mathematics.h"
 #include "libavutil/reverse.h"
 #include "avdevice.h"
+#include "packet_queue.h"
 #if CONFIG_LIBZVBI
 #include <libzvbi.h>
 #endif
@@ -55,7 +56,6 @@ extern "C" {
 
 #include "decklink_common.h"
 #include "decklink_dec.h"
-#include "packet_queue.h"
 
 #define MAX_WIDTH_VANC 1920
 const BMDDisplayMode AUTODETECT_DEFAULT_MODE = bmdModeNTSC;
@@ -1297,7 +1297,7 @@ av_cold int ff_decklink_read_header(AVFormatContext *avctx)
         goto error;
     }
 
-    avpacket_queue_init (avctx, &ctx->queue);
+    avpacket_queue_init (&ctx->queue, cctx->queue_size, avctx);
 
     if (ctx->dli->StartStreams() != S_OK) {
         av_log(avctx, AV_LOG_ERROR, "Cannot start input stream\n");

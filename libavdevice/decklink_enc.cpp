@@ -37,9 +37,9 @@ extern "C" {
 #include "libavutil/timecode.h"
 #include "libavutil/time.h"
 #include "avdevice.h"
+#include "packet_queue.h"
 }
 
-#include "packet_queue.h"
 #include "decklink_common.h"
 #include "decklink_enc.h"
 #if CONFIG_LIBKLVANC
@@ -839,7 +839,7 @@ av_cold int ff_decklink_write_header(AVFormatContext *avctx)
 
     // 1 GB
     cctx->queue_size = 1024 * 1024 * 1024;
-    avpacket_queue_init(avctx, &ctx->queue);
+    avpacket_queue_init(&ctx->queue, cctx->queue_size, avctx);
 
     return 0;
 

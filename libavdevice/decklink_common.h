@@ -38,6 +38,8 @@ extern "C" {
 #include "libklvanc/vanc.h"
 #endif
 
+#include "packet_queue.h"
+
 #ifdef _WIN32
 #define DECKLINK_BOOL BOOL
 #else
