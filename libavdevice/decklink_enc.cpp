@@ -413,6 +413,8 @@ av_cold int ff_decklink_write_trailer(AVFormatContext *avctx)
             ctx->dlo->DisableAudioOutput();
     }
 
+    avpacket_queue_end(&ctx->queue);
+
     ff_decklink_cleanup(avctx);
 
     if (ctx->output_callback)
