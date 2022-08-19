@@ -13,7 +13,7 @@ typedef struct AVPacketQueue {
     pthread_mutex_t mutex;
     pthread_cond_t cond;
     AVFormatContext *avctx;
-    int64_t max_q_size;
+    int64_t max_size;
 } AVPacketQueue;
 
 void avpacket_queue_init(AVPacketQueue *q, int64_t max_size, AVFormatContext *avctx);

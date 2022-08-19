@@ -7,7 +7,7 @@ void avpacket_queue_init(AVPacketQueue *q, int64_t max_size, AVFormatContext *av
     memset(q, 0, sizeof(AVPacketQueue));
     pthread_mutex_init(&q->mutex, NULL);
     pthread_cond_init(&q->cond, NULL);
-    q->max_q_size = max_size;
+    q->max_size = max_size;
     q->avctx = avctx;
 }
 
@@ -47,9 +47,9 @@ int avpacket_queue_put(AVPacketQueue *q, AVPacket *pkt)
 {
     PacketListEntry *pkt1;
     // Drop Packet if queue size is > maximum queue size
-    if (avpacket_queue_size(q) > (uint64_t)q->max_q_size) {
+    if (avpacket_queue_size(q) > (uint64_t)q->max_size) {
         av_packet_unref(pkt);
-        av_log(q->avctx, AV_LOG_WARNING,  "Decklink input buffer overrun!\n");
+        av_log(q->avctx, AV_LOG_WARNING,  "Queue buffer overrun.\n");
         return -1;
     }
     /* ensure the packet is reference counted */
