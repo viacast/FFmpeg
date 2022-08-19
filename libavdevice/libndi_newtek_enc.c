@@ -19,12 +19,15 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include <pthread.h>
 #include "libavformat/avformat.h"
 #include "libavformat/internal.h"
 #include "libavutil/opt.h"
 #include "libavutil/imgutils.h"
+#include "libavutil/time.h"
 
 #include "libndi_newtek_common.h"
+#include "packet_queue.h"
 
 struct NDIContext {
     const AVClass *cclass;
@@ -37,6 +40,12 @@ struct NDIContext {
     NDIlib_audio_frame_interleaved_16s_t *audio;
     NDIlib_send_instance_t ndi_send;
     AVFrame *last_avframe;
+    int64_t pts_offset;
+
+    int video_worker_thread_should_run;
+    int audio_worker_thread_should_run;
+    AVPacketQueue vqueue;
+    AVPacketQueue aqueue;
 };
 
 static int ndi_write_trailer(AVFormatContext *avctx)
@@ -48,8 +57,18 @@ static int ndi_write_trailer(AVFormatContext *avctx)
         av_frame_free(&ctx->last_avframe);
     }
 
+    if (ctx->vqueue.max_size) {
+        avpacket_queue_end(&ctx->vqueue);
+    }
+    if (ctx->aqueue.max_size) {
+        avpacket_queue_end(&ctx->aqueue);
+    }
+
     av_freep(&ctx->video);
     av_freep(&ctx->audio);
+
+    ctx->video_worker_thread_should_run = 0;
+    ctx->audio_worker_thread_should_run = 0;
 
     return 0;
 }
@@ -58,6 +77,7 @@ static int ndi_write_video_packet(AVFormatContext *avctx, AVStream *st, AVPacket
 {
     struct NDIContext *ctx = avctx->priv_data;
     AVFrame *avframe, *tmp = (AVFrame *)pkt->data;
+    int64_t final_pts;
 
     if (tmp->format != AV_PIX_FMT_UYVY422 && tmp->format != AV_PIX_FMT_BGRA &&
         tmp->format != AV_PIX_FMT_BGR0 && tmp->format != AV_PIX_FMT_RGBA &&
@@ -83,13 +103,17 @@ static int ndi_write_video_packet(AVFormatContext *avctx, AVStream *st, AVPacket
     if (!avframe)
         return AVERROR(ENOMEM);
 
-    ctx->video->timecode = av_rescale_q(pkt->pts, st->time_base, NDI_TIME_BASE_Q);
+    final_pts = pkt->pts + ctx->pts_offset;
+    ctx->video->timecode = av_rescale_q(final_pts, st->time_base, NDI_TIME_BASE_Q);
 
     ctx->video->line_stride_in_bytes = avframe->linesize[0];
     ctx->video->p_data = (void *)(avframe->data[0]);
 
-    av_log(avctx, AV_LOG_DEBUG, "%s: pkt->pts=%"PRId64", timecode=%"PRId64", st->time_base=%d/%d\n",
-        __func__, pkt->pts, ctx->video->timecode, st->time_base.num, st->time_base.den);
+    av_log(
+        avctx, AV_LOG_DEBUG, 
+        "%s: pkt->pts=%"PRId64", pts_offset=%"PRId64", final_pts=%"PRId64", timecode=%"PRId64", st->time_base=%d/%d\n",
+        __func__, pkt->pts, ctx->pts_offset, final_pts, ctx->video->timecode, st->time_base.num, st->time_base.den
+    );
 
     /* asynchronous for one frame, but will block if a second frame
         is given before the first one has been sent */
@@ -97,6 +121,7 @@ static int ndi_write_video_packet(AVFormatContext *avctx, AVStream *st, AVPacket
 
     av_frame_free(&ctx->last_avframe);
     ctx->last_avframe = avframe;
+    ctx->last_avframe->pts = pkt->pts;
 
     return 0;
 }
@@ -104,35 +129,107 @@ static int ndi_write_video_packet(AVFormatContext *avctx, AVStream *st, AVPacket
 static int ndi_write_audio_packet(AVFormatContext *avctx, AVStream *st, AVPacket *pkt)
 {
     struct NDIContext *ctx = avctx->priv_data;
+    int64_t final_pts = pkt->pts + ctx->pts_offset;
 
     ctx->audio->p_data = (short *)pkt->data;
     ctx->audio->timecode = av_rescale_q(pkt->pts, st->time_base, NDI_TIME_BASE_Q);
     ctx->audio->no_samples = pkt->size / (ctx->audio->no_channels << 1);
 
-    av_log(avctx, AV_LOG_DEBUG, "%s: pkt->pts=%"PRId64", timecode=%"PRId64", st->time_base=%d/%d\n",
-        __func__, pkt->pts, ctx->audio->timecode, st->time_base.num, st->time_base.den);
+    av_log(
+        avctx, AV_LOG_DEBUG, 
+        "%s: pkt->pts=%"PRId64", pts_offset=%"PRId64", final_pts=%"PRId64", timecode=%"PRId64", st->time_base=%d/%d\n",
+        __func__, pkt->pts, ctx->pts_offset, final_pts, ctx->audio->timecode, st->time_base.num, st->time_base.den
+    );
 
     NDIlib_util_send_send_audio_interleaved_16s(ctx->ndi_send, ctx->audio);
 
     return 0;
 }
 
+static void *ndi_video_worker_thread(void *arg) {
+    AVFormatContext *avctx = (AVFormatContext *)arg;
+    struct NDIContext *ctx = avctx->priv_data;
+    AVStream *st;
+
+    while (ctx->video_worker_thread_should_run) {
+        AVPacket pkt;
+        int ret = avpacket_queue_get(&ctx->vqueue, &pkt, 0);
+        if (!ret) {
+            st = avctx->streams[pkt.stream_index];
+            if (st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+                ndi_write_video_packet(avctx, st, &pkt);
+                av_packet_unref(&pkt);
+            } else {
+                av_log(avctx, AV_LOG_ERROR, "Non video packet in video queue.\n");
+            }
+        } else {
+            av_log(avctx, AV_LOG_WARNING, "Video packet queue is empty.\n");
+            if (st && ctx->last_avframe) {
+                av_log(avctx, AV_LOG_WARNING, "Duplicating video frame.\n");
+                ctx->pts_offset += 1;
+                ctx->video->timecode = av_rescale_q(ctx->last_avframe->pts + ctx->pts_offset, st->time_base, NDI_TIME_BASE_Q);
+                NDIlib_send_send_video_async(ctx->ndi_send, ctx->video);
+            } else {
+                av_log(avctx, AV_LOG_WARNING, "Unknown stream or no video frame available. Skipping frame duplication.\n");
+                av_usleep(30000);
+            }
+        }
+    }
+    return NULL;
+}
+
+static void *ndi_audio_worker_thread(void *arg) {
+    AVFormatContext *avctx = (AVFormatContext *)arg;
+    struct NDIContext *ctx = avctx->priv_data;
+
+    while (ctx->audio_worker_thread_should_run) {
+        AVPacket pkt;
+        int ret = avpacket_queue_get(&ctx->aqueue, &pkt, 1);
+        if (!ret) {
+            AVStream *st = avctx->streams[pkt.stream_index];
+            if (st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+                ndi_write_audio_packet(avctx, st, &pkt);
+                av_packet_unref(&pkt);
+            } else {
+                av_log(avctx, AV_LOG_ERROR, "Non audio packet in audio queue.\n");
+            }
+        } else {
+            av_log(avctx, AV_LOG_WARNING, "Audio packet queue is empty.\n");
+        }
+    }
+    return NULL;
+}
+
 static int ndi_write_packet(AVFormatContext *avctx, AVPacket *pkt)
 {
+    struct NDIContext *ctx = avctx->priv_data;
     AVStream *st = avctx->streams[pkt->stream_index];
+    AVPacketQueue *q;
+    int is_video = 0;
 
-    if      (st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
-        return ndi_write_video_packet(avctx, st, pkt);
-    else if (st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO)
-        return ndi_write_audio_packet(avctx, st, pkt);
-
-    return AVERROR_BUG;
+    if (st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+        q = &ctx->vqueue;
+        is_video = 1;
+    } else if (st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+        q = &ctx->aqueue;
+    } else {
+        return AVERROR_BUG;
+    }
+    if (avpacket_queue_put(q, pkt)) {
+        av_log(
+            avctx, AV_LOG_WARNING, 
+            "%s packet queue is full (%lu bytes, %d packets). Dropping packet.\n", 
+            is_video ? "Video" : "Audio", avpacket_queue_size(q), q->nb_packets
+        );
+    }
+    return 0;
 }
 
 static int ndi_setup_audio(AVFormatContext *avctx, AVStream *st)
 {
     struct NDIContext *ctx = avctx->priv_data;
     AVCodecParameters *c = st->codecpar;
+    pthread_t worker_thread_id;
 
     if (ctx->audio) {
         av_log(avctx, AV_LOG_ERROR, "Only one audio stream is supported!\n");
@@ -149,6 +246,13 @@ static int ndi_setup_audio(AVFormatContext *avctx, AVStream *st)
 
     avpriv_set_pts_info(st, 64, 1, NDI_TIME_BASE);
 
+    if (!ctx->audio_worker_thread_should_run) {
+        int64_t q_size = 64*1024*1024; // 64 MB
+        avpacket_queue_init(&ctx->aqueue, q_size, avctx);
+        ctx->audio_worker_thread_should_run = 1;
+        pthread_create(&worker_thread_id, NULL, ndi_audio_worker_thread, (void *)avctx);
+    }
+
     return 0;
 }
 
@@ -156,6 +260,7 @@ static int ndi_setup_video(AVFormatContext *avctx, AVStream *st)
 {
     struct NDIContext *ctx = avctx->priv_data;
     AVCodecParameters *c = st->codecpar;
+    pthread_t worker_thread_id;
 
     if (ctx->video) {
         av_log(avctx, AV_LOG_ERROR, "Only one video stream is supported!\n");
@@ -224,6 +329,13 @@ static int ndi_setup_video(AVFormatContext *avctx, AVStream *st)
         ctx->video->picture_aspect_ratio = (double)st->codecpar->width/st->codecpar->height;
 
     avpriv_set_pts_info(st, 64, 1, NDI_TIME_BASE);
+
+    if (!ctx->video_worker_thread_should_run) {
+        int64_t q_size = 1024*1024*1024; // 1 GB
+        avpacket_queue_init(&ctx->vqueue, q_size, avctx);
+        ctx->video_worker_thread_should_run = 1;
+        pthread_create(&worker_thread_id, NULL, ndi_video_worker_thread, (void *)avctx);
+    }
 
     return 0;
 }
