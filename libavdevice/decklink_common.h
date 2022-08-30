@@ -117,7 +117,6 @@ struct decklink_ctx {
     AVStream *klv_st;
     AVStream *teletext_st;
     uint16_t cdp_sequence_num;
-    int timecode;
     int64_t pts_offset;
     int frame_diff;
     int frame_drop;

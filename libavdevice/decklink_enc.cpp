@@ -170,7 +170,6 @@ public:
 
                     AVTimecode local_timecode;
                     av_timecode_init_from_now2(&local_timecode, av_make_q(st->time_base.den, st->time_base.num), 0, -ctx->timecode_offset, NULL);
-                    ctx->timecode = av_timecode_get_framenum(&local_timecode);
                     char local_timecode_str[64];
                     av_timecode_make_string(&local_timecode, local_timecode_str, 0);
                     int local_framenum = av_timecode_get_framenum(&local_timecode);
@@ -631,7 +630,6 @@ int decklink_write_video_packet(AVFormatContext *avctx, AVPacket *pkt)
             if (to_dup <= 0) {
                 to_dup = 1;
             }
-
             ctx->frame_drop = FFMAX(0, ctx->frame_drop - to_dup);
             offset = to_dup;
         }
