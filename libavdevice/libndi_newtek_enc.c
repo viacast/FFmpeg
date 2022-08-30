@@ -25,6 +25,7 @@
 #include "libavutil/opt.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/time.h"
+#include "libavutil/timecode.h"
 
 #include "libndi_newtek_common.h"
 #include "packet_queue.h"
@@ -35,12 +36,18 @@ struct NDIContext {
     /* Options */
     int reference_level;
     int clock_video, clock_audio;
+    int64_t timecode_offset;
+    int timecode_frame_tolerance_hard;
+    int timecode_frame_tolerance_soft;
+    int timecode_frames_buffer;
 
     NDIlib_video_frame_t *video;
     NDIlib_audio_frame_interleaved_16s_t *audio;
     NDIlib_send_instance_t ndi_send;
     AVFrame *last_avframe;
     int64_t pts_offset;
+    int frame_diff;
+    int frame_drop;
 
     int video_worker_thread_should_run;
     int audio_worker_thread_should_run;
@@ -103,6 +110,57 @@ static int ndi_write_video_packet(AVFormatContext *avctx, AVStream *st, AVPacket
     if (!avframe)
         return AVERROR(ENOMEM);
 
+    if (ctx->timecode_offset > 0) {
+        AVFrameSideData *sd = av_frame_get_side_data(avframe, AV_FRAME_DATA_S12M_TIMECODE);
+        if (sd) {
+            st = avctx->streams[pkt->stream_index];
+            int32_t *tc_frame = (int32_t*)sd->data;
+            int32_t frame_timecode = tc_frame[1];
+            char frame_timecode_str[64];
+            av_timecode_make_smpte_tc_string(frame_timecode_str, frame_timecode, 0);
+            int frame_framenum = av_timecode_get_smpte_framenum(frame_timecode, st->avg_frame_rate, 0);
+
+            AVTimecode local_timecode;
+            av_timecode_init_from_now2(&local_timecode, st->avg_frame_rate, 0, -ctx->timecode_offset, NULL);
+            char local_timecode_str[64];
+            av_timecode_make_string(&local_timecode, local_timecode_str, 0);
+            int local_framenum = av_timecode_get_framenum(&local_timecode);
+
+            int64_t frame_diff = frame_framenum - local_framenum - ctx->pts_offset;
+            av_log(avctx, AV_LOG_DEBUG,
+                "frame_tc=%s local_tc=%s (frame_diff=%ld frame->pts=%ld pts_offset=%ld q.nb_packets=%d)\n", 
+                frame_timecode_str, local_timecode_str, frame_diff, avframe->pts, ctx->pts_offset, ctx->vqueue.nb_packets
+            );
+
+            ctx->frame_diff = frame_diff;
+        }
+    }
+
+    if (pkt->pts && avframe->pts % 30 == 0 && FFABS(ctx->frame_diff) > ctx->timecode_frame_tolerance_soft) {
+        int offset = 0;
+        if (ctx->frame_diff < 0) {
+            int to_drop = -ctx->frame_diff;
+            to_drop -= ctx->timecode_frame_tolerance_hard;
+            if (to_drop <= 0) {
+                to_drop = 1;
+            }
+            ctx->frame_drop = ctx->frame_drop + to_drop;
+            offset = -to_drop;
+        }
+        if (ctx->frame_diff > 0) {
+            int to_dup = ctx->frame_diff - ctx->timecode_frame_tolerance_hard;
+            if (to_dup <= 0) {
+                to_dup = 1;
+            }
+            ctx->frame_drop = FFMAX(0, ctx->frame_drop - to_dup);
+            offset = to_dup;
+        }
+        if (offset != 0) {
+            av_log(avctx, AV_LOG_WARNING, "Adjusting pts offset by %d (from %ld to %ld) [frame difference = %d]\n", offset, ctx->pts_offset, ctx->pts_offset + offset, ctx->frame_diff);
+            ctx->pts_offset += offset;
+        }
+    }
+
     final_pts = pkt->pts + ctx->pts_offset;
     ctx->video->timecode = av_rescale_q(final_pts, st->time_base, NDI_TIME_BASE_Q);
 
@@ -162,7 +220,7 @@ static void *ndi_video_worker_thread(void *arg) {
             } else {
                 av_log(avctx, AV_LOG_ERROR, "Non video packet in video queue.\n");
             }
-        } else {
+        } else if (ctx->clock_video) {
             av_log(avctx, AV_LOG_WARNING, "Video packet queue is empty.\n");
             if (st && ctx->last_avframe) {
                 av_log(avctx, AV_LOG_WARNING, "Duplicating video frame.\n");
@@ -385,6 +443,10 @@ static const AVOption options[] = {
     { "reference_level", "The audio reference level in dB"  , OFFSET(reference_level), AV_OPT_TYPE_INT, { .i64 = 0 }, -20, 20, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_FLAG_AUDIO_PARAM},
     { "clock_video", "These specify whether video 'clock' themselves"  , OFFSET(clock_video), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_FLAG_VIDEO_PARAM },
     { "clock_audio", "These specify whether audio 'clock' themselves"  , OFFSET(clock_audio), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_FLAG_AUDIO_PARAM },
+    { "timecode_offset", "how long in microseconds the video should be delayed relative to current time (0 is disabled)", OFFSET(timecode_offset), AV_OPT_TYPE_INT64, { .i64 = 0 }, 0, INT64_MAX, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_FLAG_VIDEO_PARAM },
+    { "timecode_frame_tolerance_hard", "how many frames the video should be offset from the target before adjusting abruptly", OFFSET(timecode_frame_tolerance_hard), AV_OPT_TYPE_INT, { .i64 = 30 }, 0, 120, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_FLAG_VIDEO_PARAM },
+    { "timecode_frame_tolerance_soft", "how many frames the video should be offset from the target before adjusting slowly", OFFSET(timecode_frame_tolerance_soft), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 30, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_FLAG_VIDEO_PARAM },
+    { "timecode_frames_buffer", "the max amount of frames that can be buffered before dropping", OFFSET(timecode_frames_buffer), AV_OPT_TYPE_INT, { .i64 = 60 }, 0, 600, AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_FLAG_VIDEO_PARAM },
     { NULL },
 };
 
