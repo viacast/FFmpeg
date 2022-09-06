@@ -48,6 +48,7 @@ typedef struct {
     SDL_Texture *texture;
     int texture_fmt;
     SDL_Rect texture_rect;
+    SDL_AudioDeviceID audio;
 
     int inited;
 } SDLContext;
@@ -158,6 +159,7 @@ static int sdl2_write_trailer(AVFormatContext *s)
 
 static int sdl2_write_header(AVFormatContext *s)
 {
+    SDL_AudioSpec wanted_spec, spec;
     SDLContext *sdl = s->priv_data;
     AVStream *st = s->streams[0];
     AVCodecParameters *codecpar = st->codecpar;
@@ -201,7 +203,7 @@ static int sdl2_write_header(AVFormatContext *s)
 
     /* initialization */
     if (!sdl->inited){
-        if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
             av_log(s, AV_LOG_ERROR, "Unable to initialize SDL: %s\n", SDL_GetError());
             goto fail;
         }
@@ -224,6 +226,21 @@ static int sdl2_write_header(AVFormatContext *s)
 
     if (!sdl->texture) {
         av_log(sdl, AV_LOG_ERROR, "Unable to set create mode: %s\n", SDL_GetError());
+        goto fail;
+    }
+
+    wanted_spec.channels = 2;
+    wanted_spec.freq = 48000;
+    wanted_spec.format = AUDIO_S16SYS;
+    wanted_spec.silence = 0;
+    wanted_spec.samples = 2048;
+    // wanted_spec.callback = sdl_audio_callback;
+    // wanted_spec.userdata = opaque;
+    sdl->audio = SDL_OpenAudioDevice(NULL, 0, &wanted_spec, &spec, 0);
+
+    if (!sdl->audio) {
+        av_log(NULL, AV_LOG_WARNING, "SDL_OpenAudio (%d channels, %d Hz): %s\n",
+               wanted_spec.channels, wanted_spec.freq, SDL_GetError());
         goto fail;
     }
 
@@ -283,6 +300,11 @@ static int sdl2_write_packet(AVFormatContext *s, AVPacket *pkt)
     if (quit && sdl->enable_quit_action) {
         sdl2_write_trailer(s);
         return AVERROR(EIO);
+    }
+
+    if (codecpar->codec_id != AV_CODEC_ID_RAWVIDEO) {
+        av_log(NULL, AV_LOG_WARNING, "Skipping non rawvideo\n");
+        return 0;
     }
 
     av_image_fill_arrays(data, linesize, pkt->data, codecpar->format, codecpar->width, codecpar->height, 1);
@@ -359,7 +381,7 @@ const AVOutputFormat ff_sdl2_muxer = {
     .name           = "sdl,sdl2",
     .long_name      = NULL_IF_CONFIG_SMALL("SDL2 output device"),
     .priv_data_size = sizeof(SDLContext),
-    .audio_codec    = AV_CODEC_ID_NONE,
+    .audio_codec    = AV_CODEC_ID_PCM_S16LE,
     .video_codec    = AV_CODEC_ID_RAWVIDEO,
     .write_header   = sdl2_write_header,
     .write_packet   = sdl2_write_packet,
